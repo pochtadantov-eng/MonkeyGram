@@ -18,7 +18,7 @@
 Workflow: `.github/workflows/build-ipa.yml`
 
 1. Открой **Actions → Build MonkeyGram IPA → Run workflow**  
-2. Дождись job на `macos-15` (полная сборка Telegram-iOS долгая: часто 1–3+ часа)  
+2. Дождись job на `xcode-27` (полная сборка Telegram-iOS долгая: часто 1–3+ часа)  
 3. Скачай артефакт **MonkeyGram-ipa** (`MonkeyGram.ipa`)  
 4. На `main` также создаётся GitHub Release с IPA
 

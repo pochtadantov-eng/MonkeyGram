@@ -15,7 +15,8 @@ permissions:
 
 jobs:
   build-ipa:
-    runs-on: macos-15
+    # Latest Telegram-iOS needs Xcode 27.1 (Icon Composer .icon bundles).
+    runs-on: xcode-27
     timeout-minutes: 360
 
     steps:
@@ -47,15 +48,19 @@ jobs:
             --telegram-root telegram-ios \
             --overlay-root monkeygram/ios
 
-      - name: Select Xcode (best effort)
+      - name: Select Xcode from versions.json
         run: |
           set -euo pipefail
           WANT=$(python3 -c 'import json; print(json.load(open("telegram-ios/versions.json"))["xcode"])')
           echo "versions.json wants Xcode $WANT"
           if [ -d "/Applications/Xcode_${WANT}.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_${WANT}.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode_${WANT}.0.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${WANT}.0.app/Contents/Developer"
           else
-            echo "Exact Xcode $WANT not installed; using active Xcode and --overrideXcodeVersion"
+            echo "Exact Xcode $WANT not found; listing /Applications:"
+            ls /Applications | grep -i Xcode || true
+            # xcode-27 image defaults to 27.1 — still prefer override only if missing
             xcode-select -p
           fi
           xcodebuild -version
@@ -91,7 +96,9 @@ jobs:
 
           EXTRA_FLAGS=()
           WANT=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
-          if [ ! -d "/Applications/Xcode_${WANT}.app" ]; then
+          ACTIVE=$(xcodebuild -version | awk '/Xcode/{print $2}')
+          if [ "$ACTIVE" != "$WANT" ] && [ ! -d "/Applications/Xcode_${WANT}.app" ]; then
+            echo "Active Xcode is $ACTIVE, wanted $WANT — enabling --overrideXcodeVersion"
             EXTRA_FLAGS+=(--overrideXcodeVersion)
           fi
 
