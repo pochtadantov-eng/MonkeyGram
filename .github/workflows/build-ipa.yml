@@ -94,17 +94,17 @@ jobs:
 
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
-          EXTRA_FLAGS=()
           WANT=$(python3 -c 'import json; print(json.load(open("versions.json"))["xcode"])')
           ACTIVE=$(xcodebuild -version | awk '/Xcode/{print $2}')
+          OVERRIDE_FLAG=()
           if [ "$ACTIVE" != "$WANT" ] && [ ! -d "/Applications/Xcode_${WANT}.app" ]; then
             echo "Active Xcode is $ACTIVE, wanted $WANT — enabling --overrideXcodeVersion"
-            EXTRA_FLAGS+=(--overrideXcodeVersion)
+            OVERRIDE_FLAG=(--overrideXcodeVersion)
           fi
 
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
-            "${EXTRA_FLAGS[@]}" \
+            ${OVERRIDE_FLAG[@]+"${OVERRIDE_FLAG[@]}"} \
             build \
             --configurationPath="$CONFIG" \
             --codesigningInformationPath=build-system/fake-codesigning \
