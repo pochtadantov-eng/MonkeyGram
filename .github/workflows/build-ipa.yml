@@ -48,6 +48,14 @@ jobs:
             --telegram-root telegram-ios \
             --overlay-root monkeygram/ios
 
+      - name: Refresh expired fake provisioning profiles
+        run: |
+          set -euo pipefail
+          # Upstream fake-codesigning profiles expired 2026-10-30; rules_apple rejects them.
+          python3 monkeygram/ios/scripts/refresh_fake_profiles.py \
+            --codesigning-root telegram-ios/build-system/fake-codesigning \
+            --years 2
+
       - name: Select Xcode from versions.json
         run: |
           set -euo pipefail
