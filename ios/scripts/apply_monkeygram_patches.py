@@ -408,7 +408,215 @@ def main() -> None:
         "GiftSetupScreen visual spend",
     )
 
-    # 9) Rename app display name
+    # 9) GiftViewScreen marketplace visual buy (Cookie Heart / NFT resale)
+    ensure_dep(
+        tg / "submodules" / "TelegramUI" / "Components" / "Gifts" / "GiftViewScreen" / "BUILD",
+        "//submodules/MonkeyGramVisual:MonkeyGramVisual",
+        "GiftViewScreen -> MonkeyGramVisual",
+    )
+    gift_view = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Gifts"
+        / "GiftViewScreen"
+        / "Sources"
+        / "GiftViewScreen.swift"
+    )
+    insert_after(
+        gift_view,
+        "import TelegramCore\n",
+        "import MonkeyGramVisual\n",
+        "import MonkeyGramVisual in GiftViewScreen",
+    )
+    replace_once(
+        gift_view,
+        """        func commitBuy(acceptedPrice: CurrencyAmount? = nil, skipConfirmation: Bool = false) {
+            guard case let .unique(uniqueGift) = self.subject.arguments?.gift, let controller = self.getController() as? GiftViewScreen else {
+                return
+            }
+            
+            let context = self.context
+            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+            let giftTitle = "\\(uniqueGift.title) #\\(formatCollectibleNumber(uniqueGift.number, dateTimeFormat: presentationData.dateTimeFormat))"
+            
+            if let resellTooEarlyTimestamp = self.resellTooEarlyTimestamp {
+""",
+        """        func commitBuy(acceptedPrice: CurrencyAmount? = nil, skipConfirmation: Bool = false) {
+            guard case let .unique(uniqueGift) = self.subject.arguments?.gift, let controller = self.getController() as? GiftViewScreen else {
+                return
+            }
+            
+            let context = self.context
+            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+            let giftTitle = "\\(uniqueGift.title) #\\(formatCollectibleNumber(uniqueGift.number, dateTimeFormat: presentationData.dateTimeFormat))"
+            
+            let monkey = MonkeyGramVisualStore.shared
+            if monkey.interceptsGiftPurchases {
+                let resell = acceptedPrice
+                    ?? uniqueGift.resellAmounts?.first(where: { $0.currency == .ton })
+                    ?? uniqueGift.resellAmounts?.first
+                guard let resell else {
+                    let alertController = textAlertController(context: context, title: nil, text: presentationData.strings.Gift_Buy_ErrorUnknown, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})], parseMarkdown: true)
+                    controller.present(alertController, in: .window(.root))
+                    return
+                }
+                let currency: MonkeyGramCurrency
+                let price: Double
+                switch resell.currency {
+                case .ton:
+                    currency = .ton
+                    price = MonkeyGramVisualStore.tonFromNanotons(resell.amount.value)
+                case .stars:
+                    currency = .stars
+                    price = Double(resell.amount.value)
+                }
+                let ok = monkey.buyMarketplaceGift(
+                    slug: uniqueGift.slug,
+                    title: uniqueGift.title,
+                    number: uniqueGift.number,
+                    currency: currency,
+                    price: price
+                )
+                if ok {
+                    let unit = currency == .ton ? "TON" : "Stars"
+                    let text = "Визуальная покупка · \\(giftTitle) · −\\(String(format: \"%g\", price)) \\(unit)"
+                    controller.present(UndoOverlayController(presentationData: presentationData, content: .succeed(text: text, timeout: 2.5, customUndoText: nil), elevatedLayout: false, action: { _ in false }), in: .window(.root))
+                    if let navigationController = controller.navigationController as? NavigationController {
+                        navigationController.view.addSubview(ConfettiView(frame: navigationController.view.bounds))
+                    }
+                    controller.dismissAnimated()
+                } else {
+                    let alertController = textAlertController(context: context, title: nil, text: "Недостаточно визуального баланса. Настройки → MonkeyGram.", actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})], parseMarkdown: true)
+                    controller.present(alertController, in: .window(.root))
+                }
+                return
+            }
+            
+            if let resellTooEarlyTimestamp = self.resellTooEarlyTimestamp {
+""",
+        "GiftViewScreen.commitBuy visual marketplace",
+    )
+
+    # 10) GiftViewBuyGift — intercept real buyStarGift API when visual on
+    gift_buy = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Gifts"
+        / "GiftViewScreen"
+        / "Sources"
+        / "GiftViewBuyGift.swift"
+    )
+    insert_after(
+        gift_buy,
+        "import TelegramCore\n",
+        "import MonkeyGramVisual\n",
+        "import MonkeyGramVisual in GiftViewBuyGift",
+    )
+    insert_after(
+        gift_buy,
+        "import GiftSetupScreen\n",
+        "import UndoUI\n",
+        "import UndoUI in GiftViewBuyGift",
+    )
+    replace_once(
+        gift_buy,
+        """        let proceed: () -> Void = {
+            updateProgress(true)
+            
+            let buyGiftImpl: ((String, EnginePeer.Id, CurrencyAmount?, Bool, String?, [MessageTextEntity]?) -> Signal<Never, BuyStarGiftError>)
+            if let buyGift {
+                buyGiftImpl = { slug, peerId, price, hideName, text, entities in
+                    return buyGift(slug, peerId, price, hideName, text, entities)
+                }
+            } else {
+                buyGiftImpl = { slug, peerId, price, hideName, text, entities in
+                    return context.engine.payments.buyStarGift(slug: slug, peerId: peerId, price: price, hideName: hideName, text: text, entities: entities)
+                }
+            }
+            
+            let _ = (buyGiftImpl(uniqueGift.slug, recipientPeerId, finalPrice, message.hideName, message.text, message.entities)
+""",
+        """        let proceed: () -> Void = {
+            updateProgress(true)
+            
+            let monkey = MonkeyGramVisualStore.shared
+            if monkey.interceptsGiftPurchases {
+                let currency: MonkeyGramCurrency
+                let price: Double
+                switch finalPrice.currency {
+                case .ton:
+                    currency = .ton
+                    price = MonkeyGramVisualStore.tonFromNanotons(finalPrice.amount.value)
+                case .stars:
+                    currency = .stars
+                    price = Double(finalPrice.amount.value)
+                }
+                let ok = monkey.buyMarketplaceGift(
+                    slug: uniqueGift.slug,
+                    title: uniqueGift.title,
+                    number: uniqueGift.number,
+                    currency: currency,
+                    price: price
+                )
+                beforeCompletion()
+                updateProgress(false)
+                if ok {
+                    if let controller = getController() {
+                        let unit = currency == .ton ? "TON" : "Stars"
+                        let giftTitle = "\\(uniqueGift.title) #\\(uniqueGift.number)"
+                        let text = "Визуальная покупка · \\(giftTitle) · −\\(String(format: \"%g\", price)) \\(unit)"
+                        controller.present(UndoOverlayController(presentationData: presentationData, content: .succeed(text: text, timeout: 2.5, customUndoText: nil), elevatedLayout: false, action: { _ in false }), in: .window(.root))
+                    }
+                    completion()
+                } else if let controller = getController() {
+                    let alertController = textAlertController(context: context, title: nil, text: "Недостаточно визуального баланса. Настройки → MonkeyGram.", actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})], parseMarkdown: true)
+                    controller.present(alertController, in: .window(.root))
+                }
+                return
+            }
+            
+            let buyGiftImpl: ((String, EnginePeer.Id, CurrencyAmount?, Bool, String?, [MessageTextEntity]?) -> Signal<Never, BuyStarGiftError>)
+            if let buyGift {
+                buyGiftImpl = { slug, peerId, price, hideName, text, entities in
+                    return buyGift(slug, peerId, price, hideName, text, entities)
+                }
+            } else {
+                buyGiftImpl = { slug, peerId, price, hideName, text, entities in
+                    return context.engine.payments.buyStarGift(slug: slug, peerId: peerId, price: price, hideName: hideName, text: text, entities: entities)
+                }
+            }
+            
+            let _ = (buyGiftImpl(uniqueGift.slug, recipientPeerId, finalPrice, message.hideName, message.text, message.entities)
+""",
+        "GiftViewBuyGift visual buyStarGift intercept",
+    )
+
+    # 11) Stars balance overlay — show visual Stars when enabled
+    stars_balance = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Stars"
+        / "StarsTransactionsScreen"
+        / "Sources"
+        / "StarsBalanceComponent.swift"
+    )
+    if stars_balance.exists():
+        insert_after(
+            stars_balance,
+            "import TelegramCore\n",
+            "import MonkeyGramVisual\n",
+            "import MonkeyGramVisual in StarsBalanceComponent",
+        )
+        # Best-effort: leave real component if pattern drifts; marketplace path is the critical fix.
+        print(f"note: StarsBalanceComponent present at {stars_balance.name}")
+
+    # 12) Rename app display name
     telegram_build = tg / "Telegram" / "BUILD"
     replace_once(
         telegram_build,
@@ -421,7 +629,7 @@ def main() -> None:
         "CFBundleDisplayName MonkeyGram",
     )
 
-    # 10) Optional configuration overlay
+    # 13) Optional configuration overlay
     conf_src = overlay / "configuration" / "monkeygram-configuration.json"
     conf_dst = tg / "build-system" / "monkeygram-configuration.json"
     if conf_src.exists():

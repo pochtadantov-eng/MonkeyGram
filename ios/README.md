@@ -1,36 +1,38 @@
 # MonkeyGram iOS (Telegram-iOS mod → IPA)
 
-Сборка **unsigned IPA** на базе последнего [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) с визуальными функциями MonkeyGram.
+Сборка **unsigned IPA** на базе последнего [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) с визуальным слоем в духе VisualGram — **без ключей активации / Secure Enclave**.
+
+Источник визуалки: разобранный VisualGram IPA (`VisualGramLocalAppearance`, gift grid, balance history, marketplace buy). Бинарник нельзя вставить в Bazel — логика перенесена в `MonkeyGramVisual` + патчи TelegramUI.
 
 ## Что добавляет мод
 
-В **Настройки → MonkeyGram**:
+В **Настройки → MonkeyGram** (доступ всегда открыт):
 
-1. **Включить визуалку** — кнопка «Отправить подарок» в профиле  
-2. **Включить баланс** — поля Stars / TON + «Сохранить балансы» (UserDefaults, не сбрасываются)  
-3. Истории Stars / TON с визуальными пополнениями и тратами  
-4. При покупке подарка/NFT с включённым визуальным балансом — списание визуальных Stars (без реального платежа Telegram)
+1. **Включить визуалку** — «Отправить подарок» в профиле + локальный маркетплейс NFT  
+2. **Включить баланс** — Stars / TON (Grams) + сохранение (UserDefaults)  
+3. Истории Stars / TON  
+4. **Инвентарь** визуальных NFT после покупок на маркетплейсе  
+5. Покупка подарка/NFT (в т.ч. Cookie Heart) списывает визуальный баланс — **без** Telegram payments / `buyStarGift`  
+6. Display name: **MonkeyGram**
 
-Имя приложения на SpringBoard: **MonkeyGram**.
+На первом запуске визуалка и баланс включены по умолчанию.
 
 ## GitHub Actions → IPA
 
 Workflow: `.github/workflows/build-ipa.yml`
 
-1. Открой **Actions → Build MonkeyGram IPA → Run workflow**  
-2. Дождись job на `xcode-27` (полная сборка Telegram-iOS долгая: часто 1–3+ часа)  
-3. Скачай артефакт **MonkeyGram-ipa** (`MonkeyGram.ipa`)  
-4. На `main` также создаётся GitHub Release с IPA
+1. **Actions → Build MonkeyGram IPA → Run workflow**  
+2. Job на `xcode-27` (полная сборка часто 1–3+ часа)  
+3. Артефакт **MonkeyGram-ipa** (`MonkeyGram.ipa`)  
+4. На `main` — GitHub Release с IPA
 
-### Установка на iPhone
+### Установка
 
-IPA **unsigned** (как community-сборки Telegram-iOS):
+IPA **unsigned**:
 
 - AltStore / SideStore  
 - Sideloadly  
-- TrollStore (если устройство поддерживает)
-
-Нужен свой Apple ID для sideload (или TrollStore).
+- TrollStore
 
 ## Локально (macOS + Xcode)
 
@@ -52,10 +54,8 @@ python3 build-system/Make/Make.py \
   --outputBuildArtifactsPath=build/artifacts
 ```
 
-IPA: `build/artifacts/Telegram.ipa` (после патча display name = MonkeyGram).
-
 ## Важно
 
-- Для App Store / своего bundle id получи [api_id](https://core.telegram.org/api/obtaining_api_id) и правь `ios/configuration/monkeygram-configuration.json`.  
-- Community CI использует `fake-codesigning`; для установки на устройство без джейлбрейка нужен sideload.  
-- Версия Xcode в upstream `versions.json` может отличаться от runner’а — workflow включает `--overrideXcodeVersion`.
+- Для своего bundle id: [api_id](https://core.telegram.org/api/obtaining_api_id) → `ios/configuration/monkeygram-configuration.json`.  
+- Community CI = `fake-codesigning`; на устройство — sideload.  
+- Полный VisualGram (craft / schedule / emoji status / wallet card) — только ключевые buy/balance/inventory пути; без `app.visualgram.activation*`.

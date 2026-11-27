@@ -16,6 +16,8 @@ private final class MonkeyGramArguments {
     let updateTon: (String) -> Void
     let save: () -> Void
     let openHistory: (MonkeyGramCurrency) -> Void
+    let openInventory: () -> Void
+    let clearInventory: () -> Void
 
     init(
         toggleGifts: @escaping (Bool) -> Void,
@@ -23,7 +25,9 @@ private final class MonkeyGramArguments {
         updateStars: @escaping (String) -> Void,
         updateTon: @escaping (String) -> Void,
         save: @escaping () -> Void,
-        openHistory: @escaping (MonkeyGramCurrency) -> Void
+        openHistory: @escaping (MonkeyGramCurrency) -> Void,
+        openInventory: @escaping () -> Void,
+        clearInventory: @escaping () -> Void
     ) {
         self.toggleGifts = toggleGifts
         self.toggleBalance = toggleBalance
@@ -31,33 +35,44 @@ private final class MonkeyGramArguments {
         self.updateTon = updateTon
         self.save = save
         self.openHistory = openHistory
+        self.openInventory = openInventory
+        self.clearInventory = clearInventory
     }
 }
 
 private enum MonkeyGramSection: Int32 {
+    case access
     case gifts
     case balance
+    case inventory
     case actions
     case info
 }
 
 private enum MonkeyGramEntry: ItemListNodeEntry {
+    case accessStatus
     case giftsToggle(Bool)
     case giftsFooter
     case balanceToggle(Bool)
     case starsInput(String)
     case tonInput(String)
     case save
+    case inventory
+    case clearInventory
     case historyStars
     case historyTon
     case info
 
     var section: ItemListSectionId {
         switch self {
+        case .accessStatus:
+            return MonkeyGramSection.access.rawValue
         case .giftsToggle, .giftsFooter:
             return MonkeyGramSection.gifts.rawValue
         case .balanceToggle, .starsInput, .tonInput, .save:
             return MonkeyGramSection.balance.rawValue
+        case .inventory, .clearInventory:
+            return MonkeyGramSection.inventory.rawValue
         case .historyStars, .historyTon:
             return MonkeyGramSection.actions.rawValue
         case .info:
@@ -67,26 +82,31 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
 
     var stableId: Int32 {
         switch self {
-        case .giftsToggle: return 0
-        case .giftsFooter: return 1
-        case .balanceToggle: return 2
-        case .starsInput: return 3
-        case .tonInput: return 4
-        case .save: return 5
-        case .historyStars: return 6
-        case .historyTon: return 7
-        case .info: return 8
+        case .accessStatus: return 0
+        case .giftsToggle: return 1
+        case .giftsFooter: return 2
+        case .balanceToggle: return 3
+        case .starsInput: return 4
+        case .tonInput: return 5
+        case .save: return 6
+        case .inventory: return 7
+        case .clearInventory: return 8
+        case .historyStars: return 9
+        case .historyTon: return 10
+        case .info: return 11
         }
     }
 
     static func == (lhs: MonkeyGramEntry, rhs: MonkeyGramEntry) -> Bool {
         switch (lhs, rhs) {
+        case (.accessStatus, .accessStatus): return true
         case let (.giftsToggle(a), .giftsToggle(b)): return a == b
         case (.giftsFooter, .giftsFooter): return true
         case let (.balanceToggle(a), .balanceToggle(b)): return a == b
         case let (.starsInput(a), .starsInput(b)): return a == b
         case let (.tonInput(a), .tonInput(b)): return a == b
-        case (.save, .save), (.historyStars, .historyStars), (.historyTon, .historyTon), (.info, .info):
+        case (.save, .save), (.inventory, .inventory), (.clearInventory, .clearInventory),
+             (.historyStars, .historyStars), (.historyTon, .historyTon), (.info, .info):
             return true
         default:
             return false
@@ -99,7 +119,14 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
 
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! MonkeyGramArguments
+        let store = MonkeyGramVisualStore.shared
         switch self {
+        case .accessStatus:
+            return ItemListTextItem(
+                presentationData: presentationData,
+                text: .plain("Доступ: всегда открыт · без ключей активации (VisualGram LocalAppearance без Secure Enclave)."),
+                sectionId: self.section
+            )
         case let .giftsToggle(value):
             return ItemListSwitchItem(
                 presentationData: presentationData,
@@ -113,7 +140,7 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
         case .giftsFooter:
             return ItemListTextItem(
                 presentationData: presentationData,
-                text: .plain("Кнопка «Отправить подарок» в профиле и визуальные покупки подарков/NFT."),
+                text: .plain("Профиль «Отправить подарок», маркетплейс NFT (Cookie Heart и др.) — локальная покупка без Telegram payments."),
                 sectionId: self.section
             )
         case let .balanceToggle(value):
@@ -142,7 +169,7 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
             return ItemListSingleLineInputItem(
                 presentationData: presentationData,
                 systemStyle: .glass,
-                title: NSAttributedString(string: "TON", font: Font.regular(17.0), textColor: presentationData.theme.list.itemPrimaryTextColor),
+                title: NSAttributedString(string: "TON / Grams", font: Font.regular(17.0), textColor: presentationData.theme.list.itemPrimaryTextColor),
                 text: value,
                 placeholder: "0",
                 type: .decimal,
@@ -159,6 +186,26 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
                 sectionId: self.section,
                 style: .blocks,
                 action: { arguments.save() }
+            )
+        case .inventory:
+            let count = store.ownedGifts.count
+            return ItemListDisclosureItem(
+                presentationData: presentationData,
+                title: "Визуальные NFT / подарки",
+                label: count == 0 ? "" : "\(count)",
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.openInventory() }
+            )
+        case .clearInventory:
+            return ItemListActionItem(
+                presentationData: presentationData,
+                title: "Очистить инвентарь",
+                kind: .destructive,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.clearInventory() }
             )
         case .historyStars:
             return ItemListDisclosureItem(
@@ -181,7 +228,7 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
         case .info:
             return ItemListTextItem(
                 presentationData: presentationData,
-                text: .plain("MonkeyGram · только визуально. Балансы хранятся на устройстве и не сбрасываются. Реальные платежи Telegram не выполняются."),
+                text: .plain("MonkeyGram · визуальный слой VisualGram без ключей. Балансы и NFT только на устройстве. Реальные платежи Telegram не выполняются."),
                 sectionId: self.section
             )
         }
@@ -193,6 +240,7 @@ private struct MonkeyGramState: Equatable {
     var balanceEnabled: Bool
     var starsText: String
     var tonText: String
+    var inventoryCount: Int
 }
 
 public func monkeyGramVisualSettingsController(context: AccountContext) -> ViewController {
@@ -201,7 +249,8 @@ public func monkeyGramVisualSettingsController(context: AccountContext) -> ViewC
         giftsEnabled: store.visualGiftsEnabled,
         balanceEnabled: store.visualBalanceEnabled,
         starsText: store.starsBalance == 0 ? "" : String(format: "%g", store.starsBalance),
-        tonText: store.tonBalance == 0 ? "" : String(format: "%g", store.tonBalance)
+        tonText: store.tonBalance == 0 ? "" : String(format: "%g", store.tonBalance),
+        inventoryCount: store.ownedGifts.count
     )
 
     let statePromise = ValuePromise(initial, ignoreRepeated: true)
@@ -259,6 +308,24 @@ public func monkeyGramVisualSettingsController(context: AccountContext) -> ViewC
         },
         openHistory: { currency in
             pushControllerImpl?(monkeyGramHistoryController(context: context, currency: currency))
+        },
+        openInventory: {
+            pushControllerImpl?(monkeyGramInventoryController(context: context))
+        },
+        clearInventory: {
+            store.clearInventory()
+            updateState { current in
+                var current = current
+                current.inventoryCount = 0
+                return current
+            }
+            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+            presentControllerImpl?(UndoOverlayController(
+                presentationData: presentationData,
+                content: .succeed(text: "Инвентарь очищен", timeout: 2.0, customUndoText: nil),
+                elevatedLayout: false,
+                action: { _ in false }
+            ), nil)
         }
     )
 
@@ -269,6 +336,7 @@ public func monkeyGramVisualSettingsController(context: AccountContext) -> ViewC
     )
     |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
         var entries: [MonkeyGramEntry] = [
+            .accessStatus,
             .giftsToggle(state.giftsEnabled),
             .giftsFooter,
             .balanceToggle(state.balanceEnabled)
@@ -281,6 +349,8 @@ public func monkeyGramVisualSettingsController(context: AccountContext) -> ViewC
             ])
         }
         entries.append(contentsOf: [
+            .inventory,
+            .clearInventory,
             .historyStars,
             .historyTon,
             .info
@@ -375,6 +445,90 @@ func monkeyGramHistoryController(context: AccountContext, currency: MonkeyGramCu
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
             title: .text(title),
+            leftNavigationButton: nil,
+            rightNavigationButton: nil,
+            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
+        )
+        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: entries,
+            style: .blocks,
+            emptyStateItem: nil,
+            animateChanges: false
+        )
+        return (controllerState, (listState, () as Any))
+    }
+
+    return ItemListController(context: context, state: signal)
+}
+
+private enum InventoryListEntry: ItemListNodeEntry {
+    case row(MonkeyGramOwnedGift)
+    case empty
+
+    var section: ItemListSectionId { 0 }
+
+    var stableId: Int32 {
+        switch self {
+        case .empty: return 0
+        case let .row(gift):
+            return Int32(gift.id.hashValue & 0x7fffffff)
+        }
+    }
+
+    static func == (lhs: InventoryListEntry, rhs: InventoryListEntry) -> Bool {
+        switch (lhs, rhs) {
+        case (.empty, .empty): return true
+        case let (.row(a), .row(b)): return a == b
+        default: return false
+        }
+    }
+
+    static func < (lhs: InventoryListEntry, rhs: InventoryListEntry) -> Bool {
+        switch (lhs, rhs) {
+        case (.empty, _): return true
+        case (_, .empty): return false
+        case let (.row(a), .row(b)):
+            return a.at > b.at
+        }
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        switch self {
+        case .empty:
+            return ItemListTextItem(
+                presentationData: presentationData,
+                text: .plain("Инвентарь пуст. Купите NFT на маркетплейсе с включённой визуалкой."),
+                sectionId: self.section
+            )
+        case let .row(gift):
+            let priceLabel: String
+            switch gift.currency {
+            case .stars:
+                priceLabel = String(format: "%g ★", gift.price)
+            case .ton:
+                priceLabel = String(format: "%g TON", gift.price)
+            }
+            return ItemListDisclosureItem(
+                presentationData: presentationData,
+                title: gift.displayName,
+                label: priceLabel,
+                sectionId: self.section,
+                style: .blocks,
+                action: {}
+            )
+        }
+    }
+}
+
+func monkeyGramInventoryController(context: AccountContext) -> ViewController {
+    let signal = context.sharedContext.presentationData
+    |> map { presentationData -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let rows = MonkeyGramVisualStore.shared.ownedGifts
+        let entries: [InventoryListEntry] = rows.isEmpty ? [.empty] : rows.map { .row($0) }
+        let controllerState = ItemListControllerState(
+            presentationData: ItemListPresentationData(presentationData),
+            title: .text("Визуальные NFT"),
             leftNavigationButton: nil,
             rightNavigationButton: nil,
             backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
