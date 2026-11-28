@@ -1,20 +1,64 @@
 name: Build MonkeyGram IPA
 
 on:
+  # Manual only — full IPA takes ~1h; don't burn a runner on every push.
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - 'cursor/**'
-    paths:
-      - 'ios/**'
-      - '.github/workflows/build-ipa.yml'
+  # Optional: uncomment to auto-build on ios changes again.
+  # push:
+  #   branches: [main, 'cursor/**']
+  #   paths: ['ios/**', '.github/workflows/build-ipa.yml']
 
 permissions:
   contents: write
 
+concurrency:
+  group: monkeygram-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast gate (~few minutes): apply patches + catch known compile footguns before Bazel.
+  validate-patches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout MonkeyGram
+        uses: actions/checkout@v4
+        with:
+          path: monkeygram
+
+      - name: Checkout Telegram-iOS (shallow, for patch apply only)
+        uses: actions/checkout@v4
+        with:
+          repository: TelegramMessenger/Telegram-iOS
+          path: telegram-ios
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Apply + sanity-check patches
+        run: |
+          set -euo pipefail
+          python3 monkeygram/ios/scripts/apply_monkeygram_patches.py \
+            --telegram-root telegram-ios \
+            --overlay-root monkeygram/ios
+
+          # Known footguns that waste a full Bazel hour if they slip through.
+          FAIL=0
+          if rg -n 'transactionsContext\.ton\b' telegram-ios/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/*.swift; then
+            echo "::error::transactionsContext.ton is internal — pass isTon from starsContext.ton instead"
+            FAIL=1
+          fi
+          if rg -n '^import Postbox$' telegram-ios/submodules/TelegramUI/Components/Gifts/GiftSetupScreen/Sources/MonkeyGramChatGiftBridge.swift; then
+            echo "::error::MonkeyGramChatGiftBridge must not import Postbox (use Engine* wrappers)"
+            FAIL=1
+          fi
+          if ! rg -n 'isTon: component\.starsContext\.ton' telegram-ios/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift; then
+            echo "::error::Expected isTon: component.starsContext.ton on StarsTransactionsListPanelComponent call sites"
+            FAIL=1
+          fi
+          exit "$FAIL"
+
   build-ipa:
+    needs: validate-patches
     # Latest Telegram-iOS needs Xcode 27.1 (Icon Composer .icon bundles).
     runs-on: xcode-27
     timeout-minutes: 360
@@ -40,6 +84,8 @@ jobs:
           xcodebuild -version || true
           ls /Applications | grep -i Xcode || true
           python3 --version
+          # Reuse Bazel cache across runs on this self-hosted runner (huge speedup after first build).
+          du -sh /private/var/tmp/_bazel_monkeygram 2>/dev/null || echo "no bazel cache yet"
 
       - name: Apply MonkeyGram patches
         run: |
@@ -68,7 +114,6 @@ jobs:
           else
             echo "Exact Xcode $WANT not found; listing /Applications:"
             ls /Applications | grep -i Xcode || true
-            # xcode-27 image defaults to 27.1 — still prefer override only if missing
             xcode-select -p
           fi
           xcodebuild -version
@@ -85,6 +130,7 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_DIR=/Users/Shared/telegram-ios
+          # Keep a stable path so Bazel cache survives between workflow runs on this runner.
           BAZEL_USER_ROOT="/private/var/tmp/_bazel_monkeygram"
           cd "$SOURCE_DIR"
 

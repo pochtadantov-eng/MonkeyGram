@@ -678,6 +678,7 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
     let transactionsContext: StarsTransactionsContext
     let isAccount: Bool
     let mode: StarsTransactionsContext.Mode
+    let isTon: Bool
     let action: (StarsContext.State.Transaction) -> Void
 
     init(
@@ -685,12 +686,14 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
         transactionsContext: StarsTransactionsContext,
         isAccount: Bool,
         mode: StarsTransactionsContext.Mode = .all,
+        isTon: Bool = false,
         action: @escaping (StarsContext.State.Transaction) -> Void
     ) {
         self.context = context
         self.transactionsContext = transactionsContext
         self.isAccount = isAccount
         self.mode = mode
+        self.isTon = isTon
         self.action = action
     }
 """,
@@ -716,6 +719,9 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
             return false
         }
         if lhs.mode != rhs.mode {
+            return false
+        }
+        if lhs.isTon != rhs.isTon {
             return false
         }
         return true
@@ -748,7 +754,7 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
                     }
                     // Visual history: show when visual balance is ON; hide (but keep stored) when OFF.
                     if MonkeyGramVisualStore.shared.visualBalanceEnabled {
-                        let currency: MonkeyGramCurrency = component.transactionsContext.ton ? .ton : .stars
+                        let currency: MonkeyGramCurrency = component.isTon ? .ton : .stars
                         for entry in MonkeyGramVisualStore.shared.history(for: currency) {
                             let localId = "monkeygram_\\(entry.id)"
                             if existingIds.contains(localId + "_in") || existingIds.contains(localId + "_out") {
@@ -851,6 +857,7 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
                         transactionsContext: allTransactionsContext,
                         isAccount: true,
                         mode: .all,
+                        isTon: component.starsContext.ton,
                         action: { transaction in
                             component.openTransaction(transaction)
                         }
@@ -874,6 +881,7 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
                         transactionsContext: incomingTransactionsContext,
                         isAccount: true,
                         mode: .incoming,
+                        isTon: component.starsContext.ton,
                         action: { transaction in
                             component.openTransaction(transaction)
                         }
@@ -897,6 +905,7 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
                         transactionsContext: outgoingTransactionsContext,
                         isAccount: true,
                         mode: .outgoing,
+                        isTon: component.starsContext.ton,
                         action: { transaction in
                             component.openTransaction(transaction)
                         }
