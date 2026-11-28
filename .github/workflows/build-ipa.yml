@@ -1,12 +1,14 @@
 name: Build MonkeyGram IPA
 
 on:
-  # Manual only — full IPA takes ~1h; don't burn a runner on every push.
   workflow_dispatch:
-  # Optional: uncomment to auto-build on ios changes again.
-  # push:
-  #   branches: [main, 'cursor/**']
-  #   paths: ['ios/**', '.github/workflows/build-ipa.yml']
+  push:
+    branches:
+      - main
+      - 'cursor/**'
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ipa.yml'
 
 permissions:
   contents: write
