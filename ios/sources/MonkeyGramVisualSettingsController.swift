@@ -228,7 +228,7 @@ private enum MonkeyGramEntry: ItemListNodeEntry {
         case .info:
             return ItemListTextItem(
                 presentationData: presentationData,
-                text: .plain("MonkeyGram · визуальный слой VisualGram без ключей. Балансы и NFT только на устройстве. Реальные платежи Telegram не выполняются."),
+                text: .plain("MonkeyGram · без ключей. Stars/GRAM открывают обычные экраны Telegram; при включённой визуалке в истории видны локальные пополнения и списания (выключил — скрываются, но сохраняются). Подарки: «ещё → Отправить подарок»."),
                 sectionId: self.section
             )
         }

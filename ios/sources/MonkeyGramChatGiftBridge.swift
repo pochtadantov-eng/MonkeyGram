@@ -1,18 +1,18 @@
 import Foundation
 import TelegramCore
-import Postbox
 
 /// In-memory outgoing visual gift bubbles for chat history (no Telegram send).
+/// Uses Engine* wrappers only (no direct Postbox import).
 public enum MonkeyGramChatGiftBridge {
     private static let lock = NSLock()
-    private static var byPeer: [PeerId: [Message]] = [:]
+    private static var byPeer: [EnginePeer.Id: [EngineRawMessage]] = [:]
     private static var nextLocalId: Int32 = -900_000
 
     public static func addOutgoingStarGift(
-        accountPeerId: PeerId,
-        peerId: PeerId,
-        peer: Peer?,
-        accountPeer: Peer?,
+        accountPeerId: EnginePeer.Id,
+        peerId: EnginePeer.Id,
+        peer: EnginePeer?,
+        accountPeer: EnginePeer?,
         gift: StarGift.Gift,
         text: String,
         entities: [MessageTextEntity],
@@ -26,45 +26,47 @@ public enum MonkeyGramChatGiftBridge {
         let localId = nextLocalId
         let timestamp = Int32(Date().timeIntervalSince1970)
 
-        var peers = SimpleDictionary<PeerId, Peer>()
+        var peers = EngineSimpleDictionary<EnginePeer.Id, EngineRawPeer>()
         if let peer {
-            peers[peer.id] = peer
+            peers[peer.id] = peer._asPeer()
         }
         if let accountPeer {
-            peers[accountPeer.id] = accountPeer
+            peers[accountPeer.id] = accountPeer._asPeer()
         }
 
-        let media = TelegramMediaAction(
-            action: .starGift(
-                gift: .generic(gift),
-                convertStars: gift.convertStars,
-                text: text.isEmpty ? nil : text,
-                entities: entities.isEmpty ? nil : entities,
-                nameHidden: hideName,
-                savedToProfile: false,
-                converted: false,
-                upgraded: false,
-                canUpgrade: gift.upgradeStars != nil,
-                upgradeStars: includeUpgrade ? gift.upgradeStars : nil,
-                isRefunded: false,
-                isPrepaidUpgrade: false,
-                upgradeMessageId: nil,
-                peerId: nil,
-                senderId: accountPeerId,
-                savedId: nil,
-                prepaidUpgradeHash: nil,
-                giftMessageId: nil,
-                upgradeSeparate: false,
-                isAuctionAcquired: false,
-                toPeerId: nil,
-                number: nil
+        let media: [EngineRawMedia] = [
+            TelegramMediaAction(
+                action: .starGift(
+                    gift: .generic(gift),
+                    convertStars: gift.convertStars,
+                    text: text.isEmpty ? nil : text,
+                    entities: entities.isEmpty ? nil : entities,
+                    nameHidden: hideName,
+                    savedToProfile: false,
+                    converted: false,
+                    upgraded: false,
+                    canUpgrade: gift.upgradeStars != nil,
+                    upgradeStars: includeUpgrade ? gift.upgradeStars : nil,
+                    isRefunded: false,
+                    isPrepaidUpgrade: false,
+                    upgradeMessageId: nil,
+                    peerId: nil,
+                    senderId: accountPeerId,
+                    savedId: nil,
+                    prepaidUpgradeHash: nil,
+                    giftMessageId: nil,
+                    upgradeSeparate: false,
+                    isAuctionAcquired: false,
+                    toPeerId: nil,
+                    number: nil
+                )
             )
-        )
+        ]
 
-        let message = Message(
+        let message = EngineRawMessage(
             stableId: UInt32(bitPattern: localId),
             stableVersion: 0,
-            id: MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: localId),
+            id: EngineMessage.Id(peerId: peerId, namespace: Namespaces.Message.Local, id: localId),
             globallyUniqueId: Int64(localId),
             groupingKey: nil,
             groupInfo: nil,
@@ -76,12 +78,12 @@ public enum MonkeyGramChatGiftBridge {
             localTags: [],
             customTags: [],
             forwardInfo: nil,
-            author: accountPeer,
+            author: accountPeer.map { $0._asPeer() },
             text: "",
             attributes: [],
-            media: [media],
+            media: media,
             peers: peers,
-            associatedMessages: SimpleDictionary<MessageId, Message>(),
+            associatedMessages: EngineSimpleDictionary<EngineMessage.Id, EngineRawMessage>(),
             associatedMessageIds: [],
             associatedMedia: [:],
             associatedThreadInfo: nil,
@@ -91,10 +93,10 @@ public enum MonkeyGramChatGiftBridge {
     }
 
     public static func addOutgoingUniqueGift(
-        accountPeerId: PeerId,
-        peerId: PeerId,
-        peer: Peer?,
-        accountPeer: Peer?,
+        accountPeerId: EnginePeer.Id,
+        peerId: EnginePeer.Id,
+        peer: EnginePeer?,
+        accountPeer: EnginePeer?,
         gift: StarGift.UniqueGift,
         text: String?,
         entities: [MessageTextEntity]?
@@ -106,45 +108,47 @@ public enum MonkeyGramChatGiftBridge {
         let localId = nextLocalId
         let timestamp = Int32(Date().timeIntervalSince1970)
 
-        var peers = SimpleDictionary<PeerId, Peer>()
+        var peers = EngineSimpleDictionary<EnginePeer.Id, EngineRawPeer>()
         if let peer {
-            peers[peer.id] = peer
+            peers[peer.id] = peer._asPeer()
         }
         if let accountPeer {
-            peers[accountPeer.id] = accountPeer
+            peers[accountPeer.id] = accountPeer._asPeer()
         }
 
-        let media = TelegramMediaAction(
-            action: .starGiftUnique(
-                gift: .unique(gift),
-                isUpgrade: false,
-                isTransferred: true,
-                savedToProfile: false,
-                canExportDate: nil,
-                transferStars: nil,
-                isRefunded: false,
-                isPrepaidUpgrade: false,
-                peerId: peerId,
-                senderId: accountPeerId,
-                savedId: nil,
-                resaleAmount: nil,
-                canTransferDate: nil,
-                canResaleDate: nil,
-                dropOriginalDetailsStars: nil,
-                assigned: false,
-                fromOffer: false,
-                canCraftAt: nil,
-                isCrafted: false,
-                text: text,
-                entities: entities,
-                nameHidden: false
+        let media: [EngineRawMedia] = [
+            TelegramMediaAction(
+                action: .starGiftUnique(
+                    gift: .unique(gift),
+                    isUpgrade: false,
+                    isTransferred: true,
+                    savedToProfile: false,
+                    canExportDate: nil,
+                    transferStars: nil,
+                    isRefunded: false,
+                    isPrepaidUpgrade: false,
+                    peerId: peerId,
+                    senderId: accountPeerId,
+                    savedId: nil,
+                    resaleAmount: nil,
+                    canTransferDate: nil,
+                    canResaleDate: nil,
+                    dropOriginalDetailsStars: nil,
+                    assigned: false,
+                    fromOffer: false,
+                    canCraftAt: nil,
+                    isCrafted: false,
+                    text: text,
+                    entities: entities,
+                    nameHidden: false
+                )
             )
-        )
+        ]
 
-        let message = Message(
+        let message = EngineRawMessage(
             stableId: UInt32(bitPattern: localId),
             stableVersion: 0,
-            id: MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: localId),
+            id: EngineMessage.Id(peerId: peerId, namespace: Namespaces.Message.Local, id: localId),
             globallyUniqueId: Int64(localId),
             groupingKey: nil,
             groupInfo: nil,
@@ -156,12 +160,12 @@ public enum MonkeyGramChatGiftBridge {
             localTags: [],
             customTags: [],
             forwardInfo: nil,
-            author: accountPeer,
+            author: accountPeer.map { $0._asPeer() },
             text: "",
             attributes: [],
-            media: [media],
+            media: media,
             peers: peers,
-            associatedMessages: SimpleDictionary<MessageId, Message>(),
+            associatedMessages: EngineSimpleDictionary<EngineMessage.Id, EngineRawMessage>(),
             associatedMessageIds: [],
             associatedMedia: [:],
             associatedThreadInfo: nil,
@@ -170,7 +174,7 @@ public enum MonkeyGramChatGiftBridge {
         byPeer[peerId, default: []].append(message)
     }
 
-    public static func messages(for peerId: PeerId) -> [Message] {
+    public static func messages(for peerId: EnginePeer.Id) -> [EngineRawMessage] {
         lock.lock()
         defer { lock.unlock() }
         return byPeer[peerId] ?? []

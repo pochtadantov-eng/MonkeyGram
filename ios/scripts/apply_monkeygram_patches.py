@@ -251,64 +251,10 @@ def main() -> None:
         "openSettings(.monkeygram)",
     )
 
-    # When visual balance enabled, Stars/TON screens open MonkeyGram history instead of (or before) real history
-    replace_once(
-        settings_actions,
-        """        case .stars:
-            if let starsContext = self.controller?.starsContext {
-                push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: starsContext))
-            }
-        case .ton:
-            if let tonContext = self.controller?.tonContext {
-                push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: tonContext))
-            }
-""",
-        """        case .stars:
-            if MonkeyGramVisualStore.shared.visualBalanceEnabled {
-                push(monkeyGramHistoryController(context: self.context, currency: .stars))
-            } else if let starsContext = self.controller?.starsContext {
-                push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: starsContext))
-            }
-        case .ton:
-            if MonkeyGramVisualStore.shared.visualBalanceEnabled {
-                push(monkeyGramHistoryController(context: self.context, currency: .ton))
-            } else if let tonContext = self.controller?.tonContext {
-                push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: tonContext))
-            }
-""",
-        "visual Stars/TON history routing",
-    )
+    # Stars/TON open the real Telegram screens (tabs + UI). Visual history is injected into the list panel.
+    print("skip (use stock Stars/GRAM screens): visual Stars/TON history routing")
 
-    # 7) Profile gift row when visual gifts enabled
-    profile_items = peer_info_sources / "PeerInfoProfileItems.swift"
-    insert_after(
-        profile_items,
-        "import BoostLevelIconComponent\n",
-        "import MonkeyGramVisual\n",
-        "import MonkeyGramVisual in profile items",
-    )
-    replace_once(
-        profile_items,
-        """                }, contextAction: birthdayContextAction, requestLayout: { _ in
-                }))
-            }
-            
-            var hasAbout = false
-""",
-        """                }, contextAction: birthdayContextAction, requestLayout: { _ in
-                }))
-            }
-
-            if MonkeyGramVisualStore.shared.visualGiftsEnabled, user.id != context.account.peerId, user.botInfo == nil, !user.flags.contains(.isSupport) {
-                items[currentPeerInfoSection]!.append(PeerInfoScreenActionItem(id: "monkeygram.sendGift", text: presentationData.strings.Profile_SendGift, icon: PresentationResourcesSettings.premiumGift, action: {
-                    interaction.openPremiumGift()
-                }))
-            }
-            
-            var hasAbout = false
-""",
-        "profile Send Gift row (visual)",
-    )
+    # Do NOT add a custom profile «Отправить подарок» blue button — stock TG uses the «ещё» menu.
     # 8) GiftSetupScreen — always visual spend + chat plaque (never Telegram payments)
     gift_setup_dir = tg / "submodules" / "TelegramUI" / "Components" / "Gifts" / "GiftSetupScreen" / "Sources"
     gift_setup = gift_setup_dir / "GiftSetupScreen.swift"
@@ -374,12 +320,11 @@ def main() -> None:
                     return
                 }
                 if case let .starGift(starGift, _) = component.subject {
-                    let peer = self.peerMap[component.peerId]?._asPeer()
                     MonkeyGramChatGiftBridge.addOutgoingStarGift(
                         accountPeerId: component.context.account.peerId,
                         peerId: component.peerId,
-                        peer: peer,
-                        accountPeer: nil,
+                        peer: self.peerMap[component.peerId],
+                        accountPeer: self.peerMap[component.context.account.peerId],
                         gift: starGift,
                         text: textInputText.string,
                         entities: entities,
@@ -693,7 +638,316 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
         "GiftViewBuyGift visual buyStarGift intercept",
     )
 
-    # 11) Stars balance overlay — show visual Stars/TON on gift screens
+    # 11) Stars/GRAM transaction list — inject visual history when visual enabled (keep stock tabs UI)
+    stars_list = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Stars"
+        / "StarsTransactionsScreen"
+        / "Sources"
+        / "StarsTransactionsListPanelComponent.swift"
+    )
+    insert_after(
+        stars_list,
+        "import TelegramCore\n",
+        "import MonkeyGramVisual\n",
+        "import MonkeyGramVisual in StarsTransactionsListPanel",
+    )
+    replace_once(
+        stars_list,
+        """    let context: AccountContext
+    let transactionsContext: StarsTransactionsContext
+    let isAccount: Bool
+    let action: (StarsContext.State.Transaction) -> Void
+
+    init(
+        context: AccountContext,
+        transactionsContext: StarsTransactionsContext,
+        isAccount: Bool,
+        action: @escaping (StarsContext.State.Transaction) -> Void
+    ) {
+        self.context = context
+        self.transactionsContext = transactionsContext
+        self.isAccount = isAccount
+        self.action = action
+    }
+""",
+        """    let context: AccountContext
+    let transactionsContext: StarsTransactionsContext
+    let isAccount: Bool
+    let mode: StarsTransactionsContext.Mode
+    let action: (StarsContext.State.Transaction) -> Void
+
+    init(
+        context: AccountContext,
+        transactionsContext: StarsTransactionsContext,
+        isAccount: Bool,
+        mode: StarsTransactionsContext.Mode = .all,
+        action: @escaping (StarsContext.State.Transaction) -> Void
+    ) {
+        self.context = context
+        self.transactionsContext = transactionsContext
+        self.isAccount = isAccount
+        self.mode = mode
+        self.action = action
+    }
+""",
+        "StarsTransactionsListPanel add mode",
+    )
+    replace_once(
+        stars_list,
+        """    static func ==(lhs: StarsTransactionsListPanelComponent, rhs: StarsTransactionsListPanelComponent) -> Bool {
+        if lhs.context !== rhs.context {
+            return false
+        }
+        if lhs.isAccount != rhs.isAccount {
+            return false
+        }
+        return true
+    }
+""",
+        """    static func ==(lhs: StarsTransactionsListPanelComponent, rhs: StarsTransactionsListPanelComponent) -> Bool {
+        if lhs.context !== rhs.context {
+            return false
+        }
+        if lhs.isAccount != rhs.isAccount {
+            return false
+        }
+        if lhs.mode != rhs.mode {
+            return false
+        }
+        return true
+    }
+""",
+        "StarsTransactionsListPanel == mode",
+    )
+    replace_once(
+        stars_list,
+        """                    var existingIds = Set<String>()
+                    var filteredItems: [StarsContext.State.Transaction] = []
+                    for transaction in status.transactions {
+                        let id = transaction.extendedId
+                        if !existingIds.contains(id) {
+                            existingIds.insert(id)
+                            filteredItems.append(transaction)
+                        }
+                    }
+                    
+                    self.items = filteredItems
+""",
+        """                    var existingIds = Set<String>()
+                    var filteredItems: [StarsContext.State.Transaction] = []
+                    for transaction in status.transactions {
+                        let id = transaction.extendedId
+                        if !existingIds.contains(id) {
+                            existingIds.insert(id)
+                            filteredItems.append(transaction)
+                        }
+                    }
+                    // Visual history: show when visual balance is ON; hide (but keep stored) when OFF.
+                    if MonkeyGramVisualStore.shared.visualBalanceEnabled {
+                        let currency: MonkeyGramCurrency = component.transactionsContext.ton ? .ton : .stars
+                        for entry in MonkeyGramVisualStore.shared.history(for: currency) {
+                            let localId = "monkeygram_\\(entry.id)"
+                            if existingIds.contains(localId + "_in") || existingIds.contains(localId + "_out") {
+                                continue
+                            }
+                            let amountValue: Int64
+                            if currency == .ton {
+                                amountValue = Int64((entry.amount * 1_000_000_000.0).rounded())
+                            } else {
+                                amountValue = Int64(entry.amount.rounded(.down))
+                            }
+                            let signed = entry.direction == "in" ? amountValue : -amountValue
+                            let tx = StarsContext.State.Transaction(
+                                flags: [.isLocal],
+                                id: localId,
+                                count: CurrencyAmount(amount: StarsAmount(value: signed, nanos: 0), currency: currency == .ton ? .ton : .stars),
+                                date: Int32(entry.at),
+                                peer: .fragment,
+                                title: entry.title,
+                                description: entry.subtitle,
+                                photo: nil,
+                                transactionDate: nil,
+                                transactionUrl: nil,
+                                paidMessageId: nil,
+                                giveawayMessageId: nil,
+                                media: [],
+                                subscriptionPeriod: nil,
+                                starGift: nil,
+                                floodskipNumber: nil,
+                                starrefCommissionPermille: nil,
+                                starrefPeerId: nil,
+                                starrefAmount: nil,
+                                paidMessageCount: nil,
+                                premiumGiftMonths: nil,
+                                adsProceedsFromDate: nil,
+                                adsProceedsToDate: nil
+                            )
+                            let isIncoming = signed > 0
+                            let include: Bool
+                            switch component.mode {
+                            case .all:
+                                include = true
+                            case .incoming:
+                                include = isIncoming
+                            case .outgoing:
+                                include = !isIncoming
+                            }
+                            if include {
+                                existingIds.insert(tx.extendedId)
+                                filteredItems.insert(tx, at: 0)
+                            }
+                        }
+                        filteredItems.sort(by: { $0.date > $1.date })
+                    }
+                    
+                    self.items = filteredItems
+""",
+        "StarsTransactionsListPanel visual history inject",
+    )
+    # Pass mode into each panel
+    stars_screen_src = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Stars"
+        / "StarsTransactionsScreen"
+        / "Sources"
+        / "StarsTransactionsScreen.swift"
+    )
+    replace_once(
+        stars_screen_src,
+        """            let initialTransactions = self.starsState?.transactions ?? []
+            var panelItems: [StarsTransactionsPanelContainerComponent.Item] = []
+            if !initialTransactions.isEmpty {
+""",
+        """            let initialTransactions = self.starsState?.transactions ?? []
+            var panelItems: [StarsTransactionsPanelContainerComponent.Item] = []
+            let monkeyHasHistory: Bool = {
+                let currency: MonkeyGramCurrency = component.starsContext.ton ? .ton : .stars
+                return MonkeyGramVisualStore.shared.visualBalanceEnabled && !MonkeyGramVisualStore.shared.history(for: currency).isEmpty
+            }()
+            if !initialTransactions.isEmpty || monkeyHasHistory {
+""",
+        "show transaction panels when only visual history",
+    )
+    replace_once(
+        stars_screen_src,
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: allTransactionsContext,
+                        isAccount: true,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: allTransactionsContext,
+                        isAccount: true,
+                        mode: .all,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        "panel mode all",
+    )
+    replace_once(
+        stars_screen_src,
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: incomingTransactionsContext,
+                        isAccount: true,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: incomingTransactionsContext,
+                        isAccount: true,
+                        mode: .incoming,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        "panel mode incoming",
+    )
+    replace_once(
+        stars_screen_src,
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: outgoingTransactionsContext,
+                        isAccount: true,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        """                    panel: AnyComponent(StarsTransactionsListPanelComponent(
+                        context: component.context,
+                        transactionsContext: outgoingTransactionsContext,
+                        isAccount: true,
+                        mode: .outgoing,
+                        action: { transaction in
+                            component.openTransaction(transaction)
+                        }
+                    ))
+""",
+        "panel mode outgoing",
+    )
+
+    # Stars intro balance card — show visual amount
+    stars_screen = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Stars"
+        / "StarsTransactionsScreen"
+        / "Sources"
+        / "StarsTransactionsScreen.swift"
+    )
+    insert_after(
+        stars_screen,
+        "import TelegramCore\n",
+        "import MonkeyGramVisual\n",
+        "import MonkeyGramVisual in StarsTransactionsScreen",
+    )
+    replace_once(
+        stars_screen,
+        """            let formattedBalance: String
+            if component.starsContext.ton {
+                formattedBalance = formatTonAmountText(self.starsState?.balance.value ?? 0, dateTimeFormat: environment.dateTimeFormat)
+            } else {
+                formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)
+            }
+""",
+        """            let monkey = MonkeyGramVisualStore.shared
+            let formattedBalance: String
+            if monkey.visualBalanceEnabled {
+                if component.starsContext.ton {
+                    formattedBalance = formatTonAmountText(Int64((monkey.tonBalance * 1_000_000_000.0).rounded()), dateTimeFormat: environment.dateTimeFormat)
+                } else {
+                    formattedBalance = formatStarsAmountText(StarsAmount(value: Int64(monkey.starsBalance.rounded(.down)), nanos: 0), dateTimeFormat: environment.dateTimeFormat)
+                }
+            } else if component.starsContext.ton {
+                formattedBalance = formatTonAmountText(self.starsState?.balance.value ?? 0, dateTimeFormat: environment.dateTimeFormat)
+            } else {
+                formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)
+            }
+""",
+        "StarsTransactionsScreen visual balance text",
+    )
+
     stars_balance = (
         tg
         / "submodules"
@@ -711,7 +965,85 @@ func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
             "import MonkeyGramVisual\n",
             "import MonkeyGramVisual in StarsBalanceComponent",
         )
-        print(f"note: StarsBalanceComponent present at {stars_balance.name}")
+        replace_once(
+            stars_balance,
+            """            let formattedLabel: String
+            switch component.currency {
+            case .ton:
+                formattedLabel = formatTonAmountText(component.count.value, dateTimeFormat: component.dateTimeFormat, maxDecimalPositions: 3)
+            case .stars:
+                formattedLabel = formatStarsAmountText(component.count, dateTimeFormat: component.dateTimeFormat)
+            }
+""",
+            """            let monkey = MonkeyGramVisualStore.shared
+            let formattedLabel: String
+            switch component.currency {
+            case .ton:
+                if monkey.visualBalanceEnabled {
+                    formattedLabel = formatTonAmountText(Int64((monkey.tonBalance * 1_000_000_000.0).rounded()), dateTimeFormat: component.dateTimeFormat, maxDecimalPositions: 3)
+                } else {
+                    formattedLabel = formatTonAmountText(component.count.value, dateTimeFormat: component.dateTimeFormat, maxDecimalPositions: 3)
+                }
+            case .stars:
+                if monkey.visualBalanceEnabled {
+                    formattedLabel = formatStarsAmountText(StarsAmount(value: Int64(monkey.starsBalance.rounded(.down)), nanos: 0), dateTimeFormat: component.dateTimeFormat)
+                } else {
+                    formattedLabel = formatStarsAmountText(component.count, dateTimeFormat: component.dateTimeFormat)
+                }
+            }
+""",
+            "StarsBalanceComponent visual amounts",
+        )
+
+    # Hide GiftOptionsScreen top-right balance control (not wanted in MonkeyGram gift picker)
+    gift_options = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Gifts"
+        / "GiftOptionsScreen"
+        / "Sources"
+        / "GiftOptionsScreen.swift"
+    )
+    if gift_options.exists():
+        ensure_dep(
+            tg / "submodules" / "TelegramUI" / "Components" / "Gifts" / "GiftOptionsScreen" / "BUILD",
+            "//submodules/MonkeyGramVisual:MonkeyGramVisual",
+            "GiftOptionsScreen -> MonkeyGramVisual",
+        )
+        insert_after(
+            gift_options,
+            "import TelegramCore\n",
+            "import MonkeyGramVisual\n",
+            "import MonkeyGramVisual in GiftOptionsScreen",
+        )
+        replace_once(
+            gift_options,
+            """            if let balanceTitleView = self.balanceTitle.view, let balanceValueView = self.balanceValue.view, let balanceIconView = self.balanceIcon.view {
+                if balanceTitleView.superview == nil {
+                    self.addSubview(balanceTitleView)
+                    self.addSubview(balanceValueView)
+                    // The Stars glyph beside the amount; "Balance" and the number are read.
+                    balanceIconView.accessibilityElementsHidden = true
+                    self.addSubview(balanceIconView)
+                }
+""",
+            """            if let balanceTitleView = self.balanceTitle.view, let balanceValueView = self.balanceValue.view, let balanceIconView = self.balanceIcon.view {
+                // MonkeyGram: hide top-right balance chip on gift picker (stock «ещё → Отправить подарок» flow).
+                balanceTitleView.isHidden = true
+                balanceValueView.isHidden = true
+                balanceIconView.isHidden = true
+                if false, balanceTitleView.superview == nil {
+                    self.addSubview(balanceTitleView)
+                    self.addSubview(balanceValueView)
+                    // The Stars glyph beside the amount; "Balance" and the number are read.
+                    balanceIconView.accessibilityElementsHidden = true
+                    self.addSubview(balanceIconView)
+                }
+""",
+            "GiftOptionsScreen hide top-right balance",
+        )
 
     overlay_balance = (
         tg
