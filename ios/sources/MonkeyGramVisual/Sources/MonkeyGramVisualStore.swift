@@ -104,7 +104,13 @@ public final class MonkeyGramVisualStore {
     public var hasAccess: Bool { true }
 
     public var visualGiftsEnabled: Bool {
-        get { defaults.bool(forKey: prefix + Key.gifts) }
+        get {
+            // Always-on visual layer (no activation). Stored value kept for settings UI sync.
+            if defaults.object(forKey: prefix + Key.gifts) == nil {
+                return true
+            }
+            return defaults.bool(forKey: prefix + Key.gifts)
+        }
         set {
             defaults.set(newValue, forKey: prefix + Key.gifts)
             notify()
@@ -112,17 +118,20 @@ public final class MonkeyGramVisualStore {
     }
 
     public var visualBalanceEnabled: Bool {
-        get { defaults.bool(forKey: prefix + Key.balance) }
+        get {
+            if defaults.object(forKey: prefix + Key.balance) == nil {
+                return true
+            }
+            return defaults.bool(forKey: prefix + Key.balance)
+        }
         set {
             defaults.set(newValue, forKey: prefix + Key.balance)
             notify()
         }
     }
 
-    /// Marketplace / gift flows should use local spend when either visual mode is on.
-    public var interceptsGiftPurchases: Bool {
-        hasAccess && (visualGiftsEnabled || visualBalanceEnabled)
-    }
+    /// Always intercept gift/NFT buys & sends — never hit Telegram payments (fixes server «временно недоступен»).
+    public var interceptsGiftPurchases: Bool { true }
 
     public var starsBalance: Double {
         get { defaults.double(forKey: prefix + Key.stars) }
@@ -238,15 +247,14 @@ public final class MonkeyGramVisualStore {
     @discardableResult
     public func spend(currency: MonkeyGramCurrency, amount: Double, title: String, subtitle: String? = nil) -> Bool {
         guard amount > 0 else { return false }
-        if visualBalanceEnabled {
-            switch currency {
-            case .stars:
-                guard starsBalance >= amount else { return false }
-                starsBalance = (starsBalance * 100 - amount * 100).rounded() / 100
-            case .ton:
-                guard tonBalance >= amount else { return false }
-                tonBalance = (tonBalance * 10000 - amount * 10000).rounded() / 10000
-            }
+        // Always spend from local visual balances (even if UI toggle was flipped off).
+        switch currency {
+        case .stars:
+            guard starsBalance >= amount else { return false }
+            starsBalance = (starsBalance * 100 - amount * 100).rounded() / 100
+        case .ton:
+            guard tonBalance >= amount else { return false }
+            tonBalance = (tonBalance * 10000 - amount * 10000).rounded() / 10000
         }
         let entry = MonkeyGramHistoryEntry(
             id: "out-\(currency.rawValue)-\(Date().timeIntervalSince1970)",

@@ -309,8 +309,13 @@ def main() -> None:
 """,
         "profile Send Gift row (visual)",
     )
-    # 8) GiftSetupScreen visual spend
-    gift_setup = tg / "submodules" / "TelegramUI" / "Components" / "Gifts" / "GiftSetupScreen" / "Sources" / "GiftSetupScreen.swift"
+    # 8) GiftSetupScreen — always visual spend + chat plaque (never Telegram payments)
+    gift_setup_dir = tg / "submodules" / "TelegramUI" / "Components" / "Gifts" / "GiftSetupScreen" / "Sources"
+    gift_setup = gift_setup_dir / "GiftSetupScreen.swift"
+    bridge_src = overlay / "sources" / "MonkeyGramChatGiftBridge.swift"
+    if bridge_src.exists():
+        shutil.copy2(bridge_src, gift_setup_dir / "MonkeyGramChatGiftBridge.swift")
+        print("copied MonkeyGramChatGiftBridge.swift")
     insert_after(
         gift_setup,
         "import TelegramCore\n",
@@ -354,22 +359,60 @@ def main() -> None:
                 proceed()
             }
 """,
-        """            let monkey = MonkeyGramVisualStore.shared
-            if monkey.visualBalanceEnabled, let component = self.component, let controller = self.environment?.controller() {
+        """            // MonkeyGram: always local visual send — never call Telegram payments (avoids server «временно недоступен»).
+            if MonkeyGramVisualStore.shared.interceptsGiftPurchases, let component = self.component, let controller = self.environment?.controller() {
                 let presentationData = component.context.sharedContext.currentPresentationData.with { $0 }
-                let ok = monkey.spend(
+                let ok = MonkeyGramVisualStore.shared.spend(
                     currency: .stars,
                     amount: Double(finalPrice),
-                    title: "Подарок / NFT",
-                    subtitle: "Визуальная покупка"
+                    title: "Подарок",
+                    subtitle: "Визуальная отправка"
                 )
-                if ok {
-                    controller.present(UndoOverlayController(presentationData: presentationData, content: .succeed(text: "Визуальная покупка · −\\(finalPrice) Stars", timeout: 2.5, customUndoText: nil), elevatedLayout: false, action: { _ in false }), in: .window(.root))
-                    controller.dismiss()
-                } else {
+                if !ok {
                     let alertController = textAlertController(context: component.context, title: nil, text: "Недостаточно визуальных Stars. Пополните баланс в Настройки → MonkeyGram.", actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})])
                     controller.present(alertController, in: .window(.root))
+                    return
                 }
+                if case let .starGift(starGift, _) = component.subject {
+                    let peer = self.peerMap[component.peerId]?._asPeer()
+                    MonkeyGramChatGiftBridge.addOutgoingStarGift(
+                        accountPeerId: component.context.account.peerId,
+                        peerId: component.peerId,
+                        peer: peer,
+                        accountPeer: nil,
+                        gift: starGift,
+                        text: textInputText.string,
+                        entities: entities,
+                        hideName: self.hideName,
+                        includeUpgrade: self.includeUpgrade
+                    )
+                    monkeyGramRecordOwnedGift(starGift: starGift, price: Double(finalPrice))
+                }
+                let complete = component.completion
+                if let navigationController = controller.navigationController as? NavigationController {
+                    var controllers = navigationController.viewControllers
+                    controllers = controllers.filter { !($0 is GiftSetupScreen) && !($0 is GiftOptionsScreenProtocol) && !($0 is PeerInfoScreen) && !($0 is ContactSelectionController) }
+                    var foundController = false
+                    for c in controllers.reversed() {
+                        if let chatController = c as? ChatController, case .peer(id: component.peerId) = chatController.chatLocation {
+                            chatController.hintPlayNextOutgoingGift()
+                            foundController = true
+                            break
+                        }
+                    }
+                    if !foundController {
+                        let chatController = component.context.sharedContext.makeChatController(context: component.context, chatLocation: .peer(id: component.peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil)
+                        chatController.hintPlayNextOutgoingGift()
+                        controllers.append(chatController)
+                    }
+                    navigationController.setViewControllers(controllers, animated: true)
+                    navigationController.view.addSubview(ConfettiView(frame: navigationController.view.bounds))
+                    let toast = UndoOverlayController(presentationData: presentationData, content: .succeed(text: "Визуальный подарок · −\\(finalPrice) Stars", timeout: 2.5, customUndoText: nil), elevatedLayout: false, action: { _ in false })
+                    (navigationController.viewControllers.last as? ViewController)?.present(toast, in: .current)
+                } else {
+                    controller.dismiss()
+                }
+                complete?()
             } else if starsState.balance < StarsAmount(value: finalPrice, nanos: 0) {
                 let _ = (self.optionsPromise.get()
                 |> filter { $0 != nil }
@@ -407,6 +450,30 @@ def main() -> None:
 """,
         "GiftSetupScreen visual spend",
     )
+    # Helper to record ordinary gift into inventory (appended near bridge file usage)
+    helper_path = gift_setup_dir / "MonkeyGramGiftHelpers.swift"
+    if not helper_path.exists() or "monkeyGramRecordOwnedGift" not in helper_path.read_text(encoding="utf-8"):
+        helper_path.write_text(
+            """import Foundation
+import TelegramCore
+import MonkeyGramVisual
+
+func monkeyGramRecordOwnedGift(starGift: StarGift.Gift, price: Double) {
+    let gift = MonkeyGramOwnedGift(
+        slug: "gift-\\(starGift.id)",
+        title: "Gift",
+        number: 0,
+        currency: .stars,
+        price: price
+    )
+    var owned = MonkeyGramVisualStore.shared.ownedGifts
+    owned.insert(gift, at: 0)
+    MonkeyGramVisualStore.shared.ownedGifts = owned
+}
+""",
+            encoding="utf-8",
+        )
+        print("wrote MonkeyGramGiftHelpers.swift")
 
     # 9) GiftViewScreen marketplace visual buy (Cookie Heart / NFT resale)
     ensure_dep(
@@ -427,7 +494,7 @@ def main() -> None:
     insert_after(
         gift_view,
         "import TelegramCore\n",
-        "import MonkeyGramVisual\n",
+        "import MonkeyGramVisual\nimport GiftSetupScreen\n",
         "import MonkeyGramVisual in GiftViewScreen",
     )
     replace_once(
@@ -480,11 +547,42 @@ def main() -> None:
                     price: price
                 )
                 if ok {
+                    let recipientPeerId = self.recipientPeerId ?? context.account.peerId
+                    if recipientPeerId != context.account.peerId {
+                        MonkeyGramChatGiftBridge.addOutgoingUniqueGift(
+                            accountPeerId: context.account.peerId,
+                            peerId: recipientPeerId,
+                            peer: nil,
+                            accountPeer: nil,
+                            gift: uniqueGift,
+                            text: nil,
+                            entities: nil
+                        )
+                    }
                     let unit = currency == .ton ? "TON" : "Stars"
                     let text = "Визуальная покупка · \\(giftTitle) · −\\(String(format: \"%g\", price)) \\(unit)"
                     controller.present(UndoOverlayController(presentationData: presentationData, content: .succeed(text: text, timeout: 2.5, customUndoText: nil), elevatedLayout: false, action: { _ in false }), in: .window(.root))
                     if let navigationController = controller.navigationController as? NavigationController {
                         navigationController.view.addSubview(ConfettiView(frame: navigationController.view.bounds))
+                        if recipientPeerId != context.account.peerId {
+                            var controllers = navigationController.viewControllers
+                            controllers = controllers.filter { !($0 is GiftViewScreen) }
+                            var found = false
+                            for c in controllers.reversed() {
+                                if let chatController = c as? ChatController, case .peer(id: recipientPeerId) = chatController.chatLocation {
+                                    chatController.hintPlayNextOutgoingGift()
+                                    found = true
+                                    break
+                                }
+                            }
+                            if !found {
+                                let chatController = context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: recipientPeerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil)
+                                chatController.hintPlayNextOutgoingGift()
+                                controllers.append(chatController)
+                            }
+                            navigationController.setViewControllers(controllers, animated: true)
+                            return
+                        }
                     }
                     controller.dismissAnimated()
                 } else {
@@ -595,7 +693,7 @@ def main() -> None:
         "GiftViewBuyGift visual buyStarGift intercept",
     )
 
-    # 11) Stars balance overlay — show visual Stars when enabled
+    # 11) Stars balance overlay — show visual Stars/TON on gift screens
     stars_balance = (
         tg
         / "submodules"
@@ -613,10 +711,106 @@ def main() -> None:
             "import MonkeyGramVisual\n",
             "import MonkeyGramVisual in StarsBalanceComponent",
         )
-        # Best-effort: leave real component if pattern drifts; marketplace path is the critical fix.
         print(f"note: StarsBalanceComponent present at {stars_balance.name}")
 
-    # 12) Rename app display name
+    overlay_balance = (
+        tg
+        / "submodules"
+        / "TelegramUI"
+        / "Components"
+        / "Stars"
+        / "StarsBalanceOverlayComponent"
+        / "Sources"
+        / "StarsBalanceOverlayComponent.swift"
+    )
+    if overlay_balance.exists():
+        ensure_dep(
+            tg
+            / "submodules"
+            / "TelegramUI"
+            / "Components"
+            / "Stars"
+            / "StarsBalanceOverlayComponent"
+            / "BUILD",
+            "//submodules/MonkeyGramVisual:MonkeyGramVisual",
+            "StarsBalanceOverlayComponent -> MonkeyGramVisual",
+        )
+        insert_after(
+            overlay_balance,
+            "import TelegramCore\n",
+            "import MonkeyGramVisual\n",
+            "import MonkeyGramVisual in StarsBalanceOverlay",
+        )
+        replace_once(
+            overlay_balance,
+            """                            self.starsBalance = starsState?.balance.value ?? 0
+                            self.tonBalance = tonState?.balance.value ?? 0
+""",
+            """                            let monkey = MonkeyGramVisualStore.shared
+                            if monkey.visualBalanceEnabled {
+                                self.starsBalance = Int64(monkey.starsBalance.rounded(.down))
+                                self.tonBalance = Int64((monkey.tonBalance * 1_000_000_000.0).rounded())
+                            } else {
+                                self.starsBalance = starsState?.balance.value ?? 0
+                                self.tonBalance = tonState?.balance.value ?? 0
+                            }
+""",
+            "StarsBalanceOverlay visual balances",
+        )
+
+    # 12) Inject visual gift plaques into chat history
+    chat_history = tg / "submodules" / "TelegramUI" / "Sources" / "ChatHistoryEntriesForView.swift"
+    if chat_history.exists():
+        insert_after(
+            chat_history,
+            "import TelegramCore\n",
+            "import GiftSetupScreen\n",
+            "import GiftSetupScreen in ChatHistoryEntriesForView",
+        )
+        replace_once(
+            chat_history,
+            """    if reverse {
+        return (entries.reversed(), currentState)
+    } else {
+//        #if DEBUG
+//        assert(entries.map(\\.stableId) == entries.sorted().map(\\.stableId))
+//        #endif
+        return (entries, currentState)
+    }
+}
+""",
+            """    if let peerId = location.peerId {
+        for message in MonkeyGramChatGiftBridge.messages(for: peerId) {
+            let already = entries.contains(where: { entry in
+                if case let .MessageEntry(existing, _, _, _, _, _) = entry {
+                    return existing.id == message.id
+                }
+                return false
+            })
+            if already {
+                continue
+            }
+            entries.append(.MessageEntry(message, presentationData, false, nil, .none, ChatMessageEntryAttributes(rank: nil, isContact: false, contentTypeHint: .generic, updatingMedia: nil, isPlaying: false, isCentered: false, authorStoryStats: nil, displayContinueThreadFooter: false, pinToTop: false)))
+        }
+    }
+
+    if reverse {
+        return (entries.reversed(), currentState)
+    } else {
+//        #if DEBUG
+//        assert(entries.map(\\.stableId) == entries.sorted().map(\\.stableId))
+//        #endif
+        return (entries, currentState)
+    }
+}
+""",
+            "ChatHistoryEntriesForView visual gift plaques",
+        )
+
+    # 13) GiftView marketplace: also drop plaque when gifting unique NFT to another peer
+    # (commitBuy visual path already present; enrich success branch via secondary replace if needed)
+
+    # 14) Rename app display name
     telegram_build = tg / "Telegram" / "BUILD"
     replace_once(
         telegram_build,
