@@ -44,16 +44,19 @@ jobs:
             --overlay-root monkeygram/ios
 
           # Known footguns that waste a full Bazel hour if they slip through.
+          # Use grep (rg is not installed on ubuntu-latest).
           FAIL=0
-          if rg -n 'transactionsContext\.ton\b' telegram-ios/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/*.swift; then
+          STARS_SRC=telegram-ios/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources
+          BRIDGE=telegram-ios/submodules/TelegramUI/Components/Gifts/GiftSetupScreen/Sources/MonkeyGramChatGiftBridge.swift
+          if grep -REn 'transactionsContext\.ton\b' "$STARS_SRC" --include='*.swift'; then
             echo "::error::transactionsContext.ton is internal — pass isTon from starsContext.ton instead"
             FAIL=1
           fi
-          if rg -n '^import Postbox$' telegram-ios/submodules/TelegramUI/Components/Gifts/GiftSetupScreen/Sources/MonkeyGramChatGiftBridge.swift; then
+          if grep -En '^import Postbox$' "$BRIDGE"; then
             echo "::error::MonkeyGramChatGiftBridge must not import Postbox (use Engine* wrappers)"
             FAIL=1
           fi
-          if ! rg -n 'isTon: component\.starsContext\.ton' telegram-ios/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift; then
+          if ! grep -En 'isTon: component\.starsContext\.ton' "$STARS_SRC/StarsTransactionsScreen.swift"; then
             echo "::error::Expected isTon: component.starsContext.ton on StarsTransactionsListPanelComponent call sites"
             FAIL=1
           fi
